@@ -43,7 +43,27 @@ WalkMesh::WalkMesh(std::vector< glm::vec3 > const &vertices_, std::vector< glm::
 //project pt to the plane of triangle a,b,c and return the barycentric weights of the projected point:
 glm::vec3 barycentric_weights(glm::vec3 const &a, glm::vec3 const &b, glm::vec3 const &c, glm::vec3 const &pt) {
 	//TODO: implement!
-	return glm::vec3(0.25f, 0.25f, 0.5f);
+	glm::vec3 normal = cross(b - a, c - a);
+	float area = length(normal);
+	normal = normalize(normal);
+	
+	// https://stackoverflow.com/questions/9605556/how-to-project-a-point-onto-a-plane-in-3d
+	glm::vec3 dir = pt - a;
+	float dist = dot(dir, normal);
+	glm::vec3 proj = pt - dist * normal;
+	
+	// do area computations
+	glm::vec3 uCross = cross(proj - b, proj - c);
+	float uSign = (dot(uCross, normal) > 0) ? 1 : -1;
+	glm::vec3 vCross = cross(proj - c, proj - a);
+	float vSign = (dot(vCross, normal) > 0) ? 1 : -1;
+	glm::vec3 wCross = cross(proj - a, proj - b);
+	float wSign = (dot(wCross, normal) > 0) ? 1 : -1;
+
+	float u = length(uCross) / area * uSign;
+	float v = length(vCross) / area * vSign;
+	float w = length(wCross) / area * wSign;
+	return glm::vec3(u, v, w);
 }
 
 WalkPoint WalkMesh::nearest_walk_point(glm::vec3 const &world_point) const {
@@ -121,9 +141,16 @@ void WalkMesh::walk_in_triangle(WalkPoint const &start, glm::vec3 const &step, W
 	auto &time = *time_;
 
 	glm::vec3 step_coords;
+	glm::vec3 const &a = vertices[start.indices.x];
+	glm::vec3 const &b = vertices[start.indices.y];
+	glm::vec3 const &c = vertices[start.indices.z];
 	{ //project 'step' into a barycentric-coordinates direction:
 		//TODO
-		step_coords = glm::vec3(0.0f);
+		glm::vec3 normal = cross(b - a, c - a);
+		normal = normalize(normal);
+		glm::vec3 projStep = step - dot(step - a, normal) * normal;
+		glm::vec3 zero = glm::vec3() - dot(glm::vec3() - a, normal) * normal;
+		step_coords = barycentric_weights(a, b, c, projStep) - barycentric_weights(a, b, c, zero);
 	}
 	
 	//if no edge is crossed, event will just be taking the whole step:
@@ -133,6 +160,40 @@ void WalkMesh::walk_in_triangle(WalkPoint const &start, glm::vec3 const &step, W
 	//figure out which edge (if any) is crossed first.
 	// set time and end appropriately.
 	//TODO
+
+	glm::vec3 weights = start.weights;
+	glm::vec3 indices = start.indices;
+	
+	float xtime = -weights.x / step_coords.x;
+	float ytime = -weights.y / step_coords.y;
+	float ztime = -weights.z / step_coords.z;
+	time = 1.f;
+	if (xtime > 0.f && xtime < 1.f && (xtime < ytime || ytime <= 0.f) && (xtime < ztime || ztime <= 0.f)) {
+		time = xtime;
+		weights = weights + time * step_coords;
+		weights = glm::vec3(weights.y, weights.z, weights.x);
+		weights.z = 0.f;
+		indices = glm::vec3(indices.y, indices.z, indices.x);
+	}
+	else if (ytime > 0.f && ytime < 1.f && (ytime < xtime || xtime <= 0.f) && (ytime < ztime || ztime <= 0.f)) {
+		time = ytime;
+		weights = weights + time * step_coords;
+		weights = glm::vec3(weights.z, weights.x, weights.y);
+		weights.z = 0.f;
+		indices = glm::vec3(indices.z, indices.x, indices.y);
+	}
+	else if (ztime > 0.f && ztime < 1.f && (ztime < xtime || xtime <= 0.f) && (ztime < ytime || ytime <= 0.f)) {
+		time = ztime;
+		weights = weights + time * step_coords;
+		weights = glm::vec3(weights.x, weights.y, weights.z);
+		weights.z = 0.f;
+		indices = glm::vec3(indices.x, indices.y, indices.z);
+	}
+	else {
+		time = 1.f;
+		weights = weights + time * step_coords;
+	}
+	end = WalkPoint(indices, weights);
 
 	//Remember: our convention is that when a WalkPoint is on an edge,
 	// then wp.weights.z == 0.0f (so will likely need to re-order the indices)
@@ -146,18 +207,28 @@ bool WalkMesh::cross_edge(WalkPoint const &start, WalkPoint *end_, glm::quat *ro
 	auto &rotation = *rotation_;
 
 	assert(start.weights.z == 0.0f); //*must* be on an edge.
-	glm::uvec2 edge = glm::uvec2(start.indices);
 
 	//check if 'edge' is a non-boundary edge:
-	if (edge.x == edge.y /* <-- TODO: use a real check, this is just here so code compiles */) {
+	auto f = next_vertex.find(glm::uvec2(start.indices.y, start.indices.x));
+	if (f != next_vertex.end() /* <-- TODO: use a real check, this is just here so code compiles */) {
 		//it is!
 
 		//make 'end' represent the same (world) point, but on triangle (edge.y, edge.x, [other point]):
 		//TODO
+		glm::vec3 indices = glm::vec3(start.indices.y, start.indices.x, f->second);
+		glm::vec3 weights = glm::vec3(start.weights.y, start.weights.x, 0.f);
+		end = WalkPoint(indices, weights);
 
 		//make 'rotation' the rotation that takes (start.indices)'s normal to (end.indices)'s normal:
 		//TODO
-
+		glm::vec3 a = vertices[start.indices.x];
+		glm::vec3 b = vertices[start.indices.y];
+		glm::vec3 c = vertices[start.indices.z];
+		glm::vec3 d = vertices[indices.z];
+		glm::vec3 initNormal = normalize(cross(b - a, c - a));
+		glm::vec3 nextNormal = normalize(cross(d - a, b - a));
+		rotation = glm::rotation(initNormal, nextNormal);
+		// std::cout << "rotation: " << rotation.x << " " << rotation.y << " " << rotation.z << " " << rotation.w << "\n";
 		return true;
 	} else {
 		end = start;
