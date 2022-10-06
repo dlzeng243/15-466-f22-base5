@@ -6,7 +6,7 @@ Design: After being eaten many times in game 1, the apples have come back with a
 
 Screen Shot:
 
-![Screen Shot](screenshot.png)
+![Screen Shot](apples.png)
 
 How To Play:
 

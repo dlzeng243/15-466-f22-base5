@@ -54,11 +54,11 @@ glm::vec3 barycentric_weights(glm::vec3 const &a, glm::vec3 const &b, glm::vec3 
 	
 	// do area computations
 	glm::vec3 uCross = cross(proj - b, proj - c);
-	float uSign = (dot(uCross, normal) > 0) ? 1 : -1;
+	float uSign = (dot(uCross, normal) > 0) ? 1.f : -1.f;
 	glm::vec3 vCross = cross(proj - c, proj - a);
-	float vSign = (dot(vCross, normal) > 0) ? 1 : -1;
+	float vSign = (dot(vCross, normal) > 0) ? 1.f : -1.f;
 	glm::vec3 wCross = cross(proj - a, proj - b);
-	float wSign = (dot(wCross, normal) > 0) ? 1 : -1;
+	float wSign = (dot(wCross, normal) > 0) ? 1.f : -1.f;
 
 	float u = length(uCross) / area * uSign;
 	float v = length(vCross) / area * vSign;
@@ -215,7 +215,7 @@ bool WalkMesh::cross_edge(WalkPoint const &start, WalkPoint *end_, glm::quat *ro
 
 		//make 'end' represent the same (world) point, but on triangle (edge.y, edge.x, [other point]):
 		//TODO
-		glm::vec3 indices = glm::vec3(start.indices.y, start.indices.x, f->second);
+		glm::uvec3 indices = glm::vec3(start.indices.y, start.indices.x, f->second);
 		glm::vec3 weights = glm::vec3(start.weights.y, start.weights.x, 0.f);
 		end = WalkPoint(indices, weights);
 
