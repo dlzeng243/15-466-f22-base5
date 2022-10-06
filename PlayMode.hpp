@@ -36,4 +36,18 @@ struct PlayMode : Mode {
 		//camera is at player's head and will be pitched by mouse up/down motion:
 		Scene::Camera *camera = nullptr;
 	} player;
+	// apples
+	Scene::Transform apple_transform = Scene::Transform();
+	Scene::Drawable apple_draw = Scene::Drawable(&apple_transform);
+	struct Apple {
+		WalkPoint at;
+		Scene::Transform *transform = nullptr;
+	};
+	std::list<Apple> apples = {};
+	// player
+	Scene::Transform player_transform = Scene::Transform();
+	Scene::Drawable player_draw = Scene::Drawable(&player_transform);
+
+	float timer = 0.f;
+	bool finished = false;
 };

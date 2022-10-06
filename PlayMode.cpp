@@ -13,23 +13,23 @@
 
 #include <random>
 
-GLuint phonebank_meshes_for_lit_color_texture_program = 0;
-Load< MeshBuffer > phonebank_meshes(LoadTagDefault, []() -> MeshBuffer const * {
-	MeshBuffer const *ret = new MeshBuffer(data_path("phone-bank.pnct"));
-	phonebank_meshes_for_lit_color_texture_program = ret->make_vao_for_program(lit_color_texture_program->program);
+GLuint snake_meshes_for_lit_color_texture_program = 0;
+Load< MeshBuffer > snake_meshes(LoadTagDefault, []() -> MeshBuffer const * {
+	MeshBuffer const *ret = new MeshBuffer(data_path("snake.pnct"));
+	snake_meshes_for_lit_color_texture_program = ret->make_vao_for_program(lit_color_texture_program->program);
 	return ret;
 });
 
-Load< Scene > phonebank_scene(LoadTagDefault, []() -> Scene const * {
-	return new Scene(data_path("phone-bank.scene"), [&](Scene &scene, Scene::Transform *transform, std::string const &mesh_name){
-		Mesh const &mesh = phonebank_meshes->lookup(mesh_name);
+Load< Scene > snake_scene(LoadTagDefault, []() -> Scene const * {
+	return new Scene(data_path("snake.scene"), [&](Scene &scene, Scene::Transform *transform, std::string const &mesh_name){
+		Mesh const &mesh = snake_meshes->lookup(mesh_name);
 
 		scene.drawables.emplace_back(transform);
 		Scene::Drawable &drawable = scene.drawables.back();
 
 		drawable.pipeline = lit_color_texture_program_pipeline;
 
-		drawable.pipeline.vao = phonebank_meshes_for_lit_color_texture_program;
+		drawable.pipeline.vao = snake_meshes_for_lit_color_texture_program;
 		drawable.pipeline.type = mesh.type;
 		drawable.pipeline.start = mesh.start;
 		drawable.pipeline.count = mesh.count;
@@ -38,13 +38,34 @@ Load< Scene > phonebank_scene(LoadTagDefault, []() -> Scene const * {
 });
 
 WalkMesh const *walkmesh = nullptr;
-Load< WalkMeshes > phonebank_walkmeshes(LoadTagDefault, []() -> WalkMeshes const * {
-	WalkMeshes *ret = new WalkMeshes(data_path("phone-bank.w"));
+Load< WalkMeshes > snake_walkmeshes(LoadTagDefault, []() -> WalkMeshes const * {
+	WalkMeshes *ret = new WalkMeshes(data_path("snake.w"));
 	walkmesh = &ret->lookup("WalkMesh");
 	return ret;
 });
 
-PlayMode::PlayMode() : scene(*phonebank_scene) {
+PlayMode::PlayMode() : scene(*snake_scene) {
+	auto apple_erase = scene.drawables.end();
+	auto player_erase = scene.drawables.end();
+	for (auto it = scene.drawables.begin(); it != scene.drawables.end(); ++it){
+		Scene::Drawable &drawable = *it;
+		if(drawable.transform->name == "Apple") {
+			// no parent
+			assert(drawable.transform->parent == nullptr);
+			apple_draw = drawable;
+			apple_erase = it;
+		}
+		if(drawable.transform->name == "Player") {
+			// no parent
+			assert(drawable.transform->parent == nullptr);
+			player_draw = drawable;
+			player_erase = it;
+		}
+	}
+	if (apple_erase == scene.drawables.end()) throw std::runtime_error("Apple not found.");
+	if (player_erase == scene.drawables.end()) throw std::runtime_error("Player not found.");
+	scene.drawables.erase(apple_erase);
+	scene.drawables.erase(player_erase);
 	//create a player transform:
 	scene.transforms.emplace_back();
 	player.transform = &scene.transforms.back();
@@ -58,7 +79,7 @@ PlayMode::PlayMode() : scene(*phonebank_scene) {
 	player.camera->transform->parent = player.transform;
 
 	//player's eyes are 1.8 units above the ground:
-	player.camera->transform->position = glm::vec3(0.0f, 0.0f, 1.8f);
+	player.camera->transform->position = glm::vec3(0.0f, 0.0f, 3.0f);
 
 	//rotate camera facing direction (-z) to player facing direction (+y):
 	player.camera->transform->rotation = glm::angleAxis(glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
@@ -66,6 +87,9 @@ PlayMode::PlayMode() : scene(*phonebank_scene) {
 	//start player walking at nearest walk point:
 	player.at = walkmesh->nearest_walk_point(player.transform->position);
 
+
+	player_draw.transform = player.transform;
+	scene.drawables.push_back(player_draw);
 }
 
 PlayMode::~PlayMode() {
@@ -73,7 +97,7 @@ PlayMode::~PlayMode() {
 
 bool PlayMode::handle_event(SDL_Event const &evt, glm::uvec2 const &window_size) {
 
-	if (evt.type == SDL_KEYDOWN) {
+	if (evt.type == SDL_KEYDOWN && !finished) {
 		if (evt.key.keysym.sym == SDLK_ESCAPE) {
 			SDL_SetRelativeMouseMode(SDL_FALSE);
 			return true;
@@ -94,7 +118,7 @@ bool PlayMode::handle_event(SDL_Event const &evt, glm::uvec2 const &window_size)
 			down.pressed = true;
 			return true;
 		}
-	} else if (evt.type == SDL_KEYUP) {
+	} else if (evt.type == SDL_KEYUP && !finished) {
 		if (evt.key.keysym.sym == SDLK_a) {
 			left.pressed = false;
 			return true;
@@ -108,12 +132,12 @@ bool PlayMode::handle_event(SDL_Event const &evt, glm::uvec2 const &window_size)
 			down.pressed = false;
 			return true;
 		}
-	} else if (evt.type == SDL_MOUSEBUTTONDOWN) {
+	} else if (evt.type == SDL_MOUSEBUTTONDOWN && !finished) {
 		if (SDL_GetRelativeMouseMode() == SDL_FALSE) {
 			SDL_SetRelativeMouseMode(SDL_TRUE);
 			return true;
 		}
-	} else if (evt.type == SDL_MOUSEMOTION) {
+	} else if (evt.type == SDL_MOUSEMOTION && !finished) {
 		if (SDL_GetRelativeMouseMode() == SDL_TRUE) {
 			glm::vec2 motion = glm::vec2(
 				evt.motion.xrel / float(window_size.y),
@@ -137,96 +161,222 @@ bool PlayMode::handle_event(SDL_Event const &evt, glm::uvec2 const &window_size)
 }
 
 void PlayMode::update(float elapsed) {
-	//player walking:
-	{
-		//combine inputs into a move:
-		constexpr float PlayerSpeed = 3.0f;
-		glm::vec2 move = glm::vec2(0.0f);
-		if (left.pressed && !right.pressed) move.x =-1.0f;
-		if (!left.pressed && right.pressed) move.x = 1.0f;
-		if (down.pressed && !up.pressed) move.y =-1.0f;
-		if (!down.pressed && up.pressed) move.y = 1.0f;
+	if(!finished) {
 
-		//make it so that moving diagonally doesn't go faster:
-		if (move != glm::vec2(0.0f)) move = glm::normalize(move) * PlayerSpeed * elapsed;
+		// spawn apple every 3 seconds
+		if((int)(floor(timer + elapsed)) / 3 - (int)(floor(timer)) / 3 > 0) {
+			scene.transforms.emplace_back();
+			Scene::Transform &transform = scene.transforms.back();
+			struct Apple app;
+			app.transform = &transform;
+			int rand_idx = rand() % walkmesh->triangles.size();
+			// std::cout << rand_idx << "\n";
+			app.at = WalkPoint(walkmesh->triangles[rand_idx], glm::vec3(1.f / 3.f));
+			// std::cout << walkmesh->triangles[rand_idx].x << " " << walkmesh->triangles[rand_idx].y << " " << walkmesh->triangles[rand_idx].z << "\n";
+			transform.position = walkmesh->vertices[app.at.indices.x] * app.at.weights.x
+							+ walkmesh->vertices[app.at.indices.y] * app.at.weights.y
+							+ walkmesh->vertices[app.at.indices.z] * app.at.weights.z;
 
-		//get move in world coordinate system:
-		glm::vec3 remain = player.transform->make_local_to_world() * glm::vec4(move.x, move.y, 0.0f, 0.0f);
+			// std::cout << transform.position.x << " " << transform.position.y << " " << transform.position.z << "\n";
+			glm::vec3 nextNormal = normalize(cross(walkmesh->vertices[app.at.indices.y] - walkmesh->vertices[app.at.indices.x], 
+												walkmesh->vertices[app.at.indices.z] - walkmesh->vertices[app.at.indices.x]));
+			transform.rotation = glm::rotation(glm::vec3(0, 0, 1), nextNormal);
+			Scene::Drawable apple = Scene::Drawable(&transform);
+			apple.pipeline = apple_draw.pipeline;
+			scene.drawables.push_back(apple);
+			apples.push_back(app);
+		}
+		timer = timer + elapsed;
+		//player walking:
+		{
+			//combine inputs into a move:
+			constexpr float PlayerSpeed = 3.0f;
+			glm::vec2 move = glm::vec2(0.0f);
+			if (left.pressed && !right.pressed) move.x =-1.0f;
+			if (!left.pressed && right.pressed) move.x = 1.0f;
+			if (down.pressed && !up.pressed) move.y =-1.0f;
+			if (!down.pressed && up.pressed) move.y = 1.0f;
 
-		//using a for() instead of a while() here so that if walkpoint gets stuck in
-		// some awkward case, code will not infinite loop:
-		for (uint32_t iter = 0; iter < 10; ++iter) {
-			if (remain == glm::vec3(0.0f)) break;
-			WalkPoint end;
-			float time;
-			walkmesh->walk_in_triangle(player.at, remain, &end, &time);
-			player.at = end;
-			if (time == 1.0f) {
-				//finished within triangle:
-				remain = glm::vec3(0.0f);
-				break;
-			}
-			//some step remains:
-			remain *= (1.0f - time);
-			//try to step over edge:
-			glm::quat rotation;
-			if (walkmesh->cross_edge(player.at, &end, &rotation)) {
-				//stepped to a new triangle:
+			//make it so that moving diagonally doesn't go faster:
+			if (move != glm::vec2(0.0f)) move = glm::normalize(move) * PlayerSpeed * elapsed;
+
+			//get move in world coordinate system:
+			glm::vec3 remain = player.transform->make_local_to_world() * glm::vec4(move.x, move.y, 0.0f, 0.0f);
+
+			//using a for() instead of a while() here so that if walkpoint gets stuck in
+			// some awkward case, code will not infinite loop:
+			for (uint32_t iter = 0; iter < 10; ++iter) {
+				if (remain == glm::vec3(0.0f)) break;
+				WalkPoint end;
+				float time;
+				walkmesh->walk_in_triangle(player.at, remain, &end, &time);
 				player.at = end;
-				//rotate step to follow surface:
-				remain = rotation * remain;
-			} else {
-				//ran into a wall, bounce / slide along it:
-				glm::vec3 const &a = walkmesh->vertices[player.at.indices.x];
-				glm::vec3 const &b = walkmesh->vertices[player.at.indices.y];
-				glm::vec3 const &c = walkmesh->vertices[player.at.indices.z];
-				glm::vec3 along = glm::normalize(b-a);
-				glm::vec3 normal = glm::normalize(glm::cross(b-a, c-a));
-				glm::vec3 in = glm::cross(normal, along);
-
-				//check how much 'remain' is pointing out of the triangle:
-				float d = glm::dot(remain, in);
-				if (d < 0.0f) {
-					//bounce off of the wall:
-					remain += (-1.25f * d) * in;
+				// std::cout << player.at.weights.x << " " << player.at.weights.y << " " << player.at.weights.z << "\n";
+				if (time == 1.0f) {
+					//finished within triangle:
+					remain = glm::vec3(0.0f);
+					break;
+				}
+				//some step remains:
+				remain *= (1.0f - time);
+				//try to step over edge:
+				glm::quat rotation;
+				if (walkmesh->cross_edge(player.at, &end, &rotation)) {
+					//stepped to a new triangle:
+					player.at = end;
+					//rotate step to follow surface:
+					remain = rotation * remain;
 				} else {
-					//if it's just pointing along the edge, bend slightly away from wall:
-					remain += 0.01f * d * in;
+					//ran into a wall, bounce / slide along it:
+					glm::vec3 const &a = walkmesh->vertices[player.at.indices.x];
+					glm::vec3 const &b = walkmesh->vertices[player.at.indices.y];
+					glm::vec3 const &c = walkmesh->vertices[player.at.indices.z];
+					glm::vec3 along = glm::normalize(b-a);
+					glm::vec3 normal = glm::normalize(glm::cross(b-a, c-a));
+					glm::vec3 in = glm::cross(normal, along);
+
+					//check how much 'remain' is pointing out of the triangle:
+					float d = glm::dot(remain, in);
+					if (d < 0.0f) {
+						//bounce off of the wall:
+						remain += (-1.25f * d) * in;
+					} else {
+						//if it's just pointing along the edge, bend slightly away from wall:
+						remain += 0.01f * d * in;
+					}
+				}
+			}
+
+			if (remain != glm::vec3(0.0f)) {
+				std::cout << "NOTE: code used full iteration budget for walking." << std::endl;
+			}
+
+			//update player's position to respect walking:
+			glm::vec3 pos = walkmesh->to_world_point(player.at);
+			player.transform->position = pos;
+			{ //update player's rotation to respect local (smooth) up-vector:
+				
+				glm::quat adjust = glm::rotation(
+					player.transform->rotation * glm::vec3(0.0f, 0.0f, 1.0f), //current up vector
+					walkmesh->to_world_smooth_normal(player.at) //smoothed up vector at walk location
+				);
+				glm::quat rot = glm::normalize(adjust * player.transform->rotation);
+				player.transform->rotation = rot;
+			}
+
+			/*
+			glm::mat4x3 frame = camera->transform->make_local_to_parent();
+			glm::vec3 right = frame[0];
+			//glm::vec3 up = frame[1];
+			glm::vec3 forward = -frame[2];
+
+			camera->transform->position += move.x * right + move.y * forward;
+			*/
+		}
+		// apples movement
+		{	
+			for(auto it = apples.begin(); it != apples.end(); it++) {
+
+				//combine inputs into a move:
+				constexpr float appleSpeed = 2.0f;
+				// get a direction from apple to player
+				glm::vec3 dir = appleSpeed * elapsed * normalize(player.transform->position - (*it).transform->position);
+				//using a for() instead of a while() here so that if walkpoint gets stuck in
+				// some awkward case, code will not infinite loop:
+				for (uint32_t iter = 0; iter < 10; ++iter) {
+					if (dir == glm::vec3(0.0f)) break;
+					WalkPoint end;
+					float time;
+					walkmesh->walk_in_triangle((*it).at, dir, &end, &time);
+					(*it).at = end;
+					// std::cout << player.at.weights.x << " " << player.at.weights.y << " " << player.at.weights.z << "\n";
+					if (time == 1.0f) {
+						//finished within triangle:
+						dir = glm::vec3(0.0f);
+						break;
+					}
+					//some step remains:
+					dir *= (1.0f - time);
+					//try to step over edge:
+					glm::quat rotation;
+					if (walkmesh->cross_edge((*it).at, &end, &rotation)) {
+						//stepped to a new triangle:
+						(*it).at = end;
+						//rotate step to follow surface:
+						dir = rotation * dir;
+					} else {
+						//ran into a wall, bounce / slide along it:
+						glm::vec3 const &a = walkmesh->vertices[player.at.indices.x];
+						glm::vec3 const &b = walkmesh->vertices[player.at.indices.y];
+						glm::vec3 const &c = walkmesh->vertices[player.at.indices.z];
+						glm::vec3 along = glm::normalize(b-a);
+						glm::vec3 normal = glm::normalize(glm::cross(b-a, c-a));
+						glm::vec3 in = glm::cross(normal, along);
+
+						//check how much 'remain' is pointing out of the triangle:
+						float d = glm::dot(dir, in);
+						if (d < 0.0f) {
+							//bounce off of the wall:
+							dir += (-1.25f * d) * in;
+						} else {
+							//if it's just pointing along the edge, bend slightly away from wall:
+							dir += 0.01f * d * in;
+						}
+					}
+				}
+
+				if (dir != glm::vec3(0.0f)) {
+					std::cout << "NOTE: code used full iteration budget for walking." << std::endl;
+				}
+
+				//update player's position to respect walking:
+				glm::vec3 pos = walkmesh->to_world_point((*it).at);
+				(*it).transform->position = pos;
+				{ //update player's rotation to respect local (smooth) up-vector:
+					
+					glm::quat adjust = glm::rotation(
+						(*it).transform->rotation * glm::vec3(0.0f, 0.0f, 1.0f), //current up vector
+						walkmesh->to_world_smooth_normal((*it).at) //smoothed up vector at walk location
+					);
+					glm::quat rot = glm::normalize(adjust * (*it).transform->rotation);
+					(*it).transform->rotation = rot;
+				}
+
+				/*
+				glm::mat4x3 frame = camera->transform->make_local_to_parent();
+				glm::vec3 right = frame[0];
+				//glm::vec3 up = frame[1];
+				glm::vec3 forward = -frame[2];
+
+				camera->transform->position += move.x * right + move.y * forward;
+				*/
+			}
+		}
+
+		// check done
+		{
+			for(auto it = apples.begin(); it != apples.end(); it++) {
+				if(distance2((*it).transform->position, player.transform->position) < 1) {
+					finished = true;
+					SDL_SetRelativeMouseMode(SDL_FALSE);
+					left.pressed = false;	
+					right.pressed = false;					
+					up.pressed = false;	
+					down.pressed = false;
+					left.downs = 0;
+					right.downs = 0;
+					up.downs = 0;
+					down.downs = 0;
 				}
 			}
 		}
 
-		if (remain != glm::vec3(0.0f)) {
-			std::cout << "NOTE: code used full iteration budget for walking." << std::endl;
-		}
-
-		//update player's position to respect walking:
-		player.transform->position = walkmesh->to_world_point(player.at);
-
-		{ //update player's rotation to respect local (smooth) up-vector:
-			
-			glm::quat adjust = glm::rotation(
-				player.transform->rotation * glm::vec3(0.0f, 0.0f, 1.0f), //current up vector
-				walkmesh->to_world_smooth_normal(player.at) //smoothed up vector at walk location
-			);
-			player.transform->rotation = glm::normalize(adjust * player.transform->rotation);
-		}
-
-		/*
-		glm::mat4x3 frame = camera->transform->make_local_to_parent();
-		glm::vec3 right = frame[0];
-		//glm::vec3 up = frame[1];
-		glm::vec3 forward = -frame[2];
-
-		camera->transform->position += move.x * right + move.y * forward;
-		*/
+		//reset button press counters:
+		left.downs = 0;
+		right.downs = 0;
+		up.downs = 0;
+		down.downs = 0;
 	}
-
-	//reset button press counters:
-	left.downs = 0;
-	right.downs = 0;
-	up.downs = 0;
-	down.downs = 0;
 }
 
 void PlayMode::draw(glm::uvec2 const &drawable_size) {

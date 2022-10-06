@@ -1,8 +1,8 @@
-# (TODO: your game's title)
+# Revenge of the apples
 
-Author: (TODO: your name)
+Author: Daniel Zeng (dlzeng)
 
-Design: (TODO: In two sentences or fewer, describe what is new and interesting about your game.)
+Design: After being eaten many times in game 1, the apples have come back with a vengeance. Try to avoid them for as long as you can!
 
 Screen Shot:
 
@@ -10,9 +10,9 @@ Screen Shot:
 
 How To Play:
 
-(TODO: describe the controls and (if needed) goals/strategy.)
+Move with WASD, apples spawn every 3 seconds on a random triangle.
 
-Sources: (TODO: list a source URL for any assets you did not create yourself. Make sure you have a license for the asset.)
+Sources: All created in blender by me.
 
 This game was built with [NEST](NEST.md).
 
